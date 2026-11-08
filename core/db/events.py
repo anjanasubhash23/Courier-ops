@@ -25,11 +25,7 @@ def record_event(
     route_id: int | None = None,
     reason: str | None = None,
 ) -> TrackingEvent:
-    """Append an event and update the shipment's current state in the same transaction.
-
-    Events can arrive late (a delayed scan upload). A late event is stored but doesn't overwrite
-    the state set by a newer one, so the projection always reflects the latest `occurred_at`.
-    """
+    """Append an event and update the shipment's current state in the same transaction."""
     if occurred_at.tzinfo is None:
         raise ValueError("occurred_at must be timezone-aware")
 
@@ -47,14 +43,22 @@ def record_event(
         occurred_at=occurred_at,
     )
     session.add(event)
-
-    if shipment.last_event_at is None or occurred_at >= shipment.last_event_at:
-        shipment.status = STATUS_AFTER_EVENT[event_type]
-        shipment.last_event_at = occurred_at
-        if hub_id is not None:
-            shipment.last_scan_hub_id = hub_id
-        if event_type is EventType.DELIVERED:
-            shipment.delivered_at = occurred_at
-
+    apply_event(shipment, event_type, occurred_at, hub_id)
     session.flush()
     return event
+
+
+def apply_event(shipment: Shipment, event_type: EventType, occurred_at: datetime, hub_id: int | None) -> None:
+    """Update the shipment's projected state for one event. The only place the projection rule lives.
+
+    Events can arrive late (a delayed scan upload). A late event is stored but doesn't overwrite
+    the state set by a newer one, so the projection always reflects the latest `occurred_at`.
+    """
+    if shipment.last_event_at is not None and occurred_at < shipment.last_event_at:
+        return
+    shipment.status = STATUS_AFTER_EVENT[event_type]
+    shipment.last_event_at = occurred_at
+    if hub_id is not None:
+        shipment.last_scan_hub_id = hub_id
+    if event_type is EventType.DELIVERED:
+        shipment.delivered_at = occurred_at

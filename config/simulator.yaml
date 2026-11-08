@@ -1,1 +1,40 @@
-# fault rates, demand
+# Simulator settings. The same seed and config always produce the same shipments, events and faults.
+# Times are local to `timezone`; the database stores UTC.
+
+seed: 42
+timezone: Asia/Kolkata
+
+demand:
+  shipments_per_day: 300
+  daily_noise: 0.1                         # each day's volume varies by up to ±10%
+  weekday_factor: [1.0, 1.0, 1.0, 1.0, 1.05, 0.9, 0.6]   # Monday .. Sunday
+  booking_hours: [9, 20]                   # bookings are spread over this local window
+  express_share: 0.2
+  local_share: 0.15                        # delivered by the same delivery center that picked up
+  # Relative share of bookings picked up at / delivered by each delivery center (unlisted ones get 1).
+  hub_weights: {DEL-DC1: 3, BOM-DC1: 3, BLR-DC1: 3, MAA-DC1: 2, HYD-DC1: 2, CCU-DC1: 1.5, PNQ-DC1: 1.5}
+  weight_grams: {median: 900, sigma: 0.8, min: 50, max: 30000}   # log-normal
+
+# Promised delivery: this many days after booking, by `promise_hour` local time.
+sla_days:
+  express: {local: 1, intercity: 2}
+  standard: {local: 2, intercity: 5}
+promise_hour: 21
+
+timing:
+  pickup_hours: [1, 4]                     # after booking
+  last_pickup_hour: 20                     # later pickups move to the next morning
+  hub_dwell_minutes: [60, 180]             # sorting time before each departure
+  transit_jitter: [0.95, 1.15]             # multiplier on a route's planned transit time
+  delivery_start_hour: 9                   # out for delivery from 09:00 local
+  delivery_hours: [1, 8]                   # from out-for-delivery to the attempt
+
+# At most one fault per shipment. Rates are per shipment and must sum to less than 1.
+faults:
+  pickup_delay: {rate: 0.02, hours: [24, 48]}
+  hub_stuck: {rate: 0.03, hours: [36, 96]}
+  missed_connection: {rate: 0.04, hours: {road: 24, air: 12}}   # waits for the next departure
+  misroute: {rate: 0.01}                   # sent to a wrong hub, then re-routed
+  failed_delivery: {rate: 0.06, attempts_weights: [0.5, 0.3, 0.2]}  # 1, 2 or 3 failed attempts
+  lost: {rate: 0.005}                      # departs a hub and is never scanned again
+max_delivery_attempts: 3                   # after this many failures the shipment returns to origin

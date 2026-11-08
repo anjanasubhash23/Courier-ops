@@ -1,1 +1,78 @@
-# question + gold SQL
+# Gold questions for Text-to-SQL. A generated query is correct when it returns the same rows as the gold SQL
+# (column names ignored; row order only checked when `ordered: true`; numbers compared to 1 decimal place).
+# {as_of} is replaced by the simulated "now". Keep these different from core/ask/examples.py.
+
+- question: How many shipments are there in total?
+  sql: SELECT count(*) FROM shipments
+
+- question: How many shipments are in transit right now?
+  sql: SELECT count(*) FROM shipments WHERE status = 'in_transit'
+
+- question: What percentage of delivered shipments were delivered on time?
+  sql: SELECT round(100.0 * count(*) FILTER (WHERE delivered_on_time) / nullif(count(*), 0), 1) FROM shipments WHERE status = 'delivered'
+
+- question: Which delivery center has delivered the most shipments?
+  sql: |
+    SELECT destination_hub FROM shipments WHERE status = 'delivered'
+    GROUP BY destination_hub ORDER BY count(*) DESC LIMIT 1
+
+- question: How many open exceptions are there for each rule?
+  sql: SELECT rule, count(*) FROM exceptions WHERE status = 'open' GROUP BY rule
+
+- question: Which hub has the most open exceptions?
+  sql: SELECT hub FROM exceptions WHERE status = 'open' GROUP BY hub ORDER BY count(*) DESC LIMIT 1
+
+- question: What is the average weight of express shipments in kilograms?
+  sql: SELECT round(avg(weight_grams) / 1000.0, 1) FROM shipments WHERE service_level = 'express'
+
+- question: How many failed delivery attempts were there for each reason?
+  sql: SELECT reason, count(*) FROM tracking_events WHERE event_type = 'delivery_attempt_failed' GROUP BY reason
+
+- question: List the tracking numbers of shipments that have been returned to the sender.
+  sql: SELECT tracking_number FROM shipments WHERE status = 'returned'
+
+- question: How many shipments were booked on 15 October 2026, India time?
+  sql: |
+    SELECT count(*) FROM shipments
+    WHERE booked_at >= TIMESTAMPTZ '2026-10-15 00:00+05:30' AND booked_at < TIMESTAMPTZ '2026-10-16 00:00+05:30'
+
+- question: Which route has had the most departures? Give the origin hub, destination hub and mode.
+  sql: |
+    SELECT hub, route_destination_hub, route_mode FROM tracking_events WHERE event_type = 'departed_hub'
+    GROUP BY hub, route_destination_hub, route_mode ORDER BY count(*) DESC LIMIT 1
+
+- question: How many shipments went from Bengaluru to New Delhi?
+  sql: SELECT count(*) FROM shipments WHERE origin_city = 'Bengaluru' AND destination_city = 'New Delhi'
+
+- question: What is the average time from booking to delivery, in hours, for each service level?
+  sql: |
+    SELECT service_level, round((avg(extract(epoch FROM delivered_at - booked_at)) / 3600)::numeric, 1)
+    FROM shipments WHERE delivered_at IS NOT NULL GROUP BY service_level
+
+- question: How many exceptions were detected in the last 24 hours?
+  sql: SELECT count(*) FROM exceptions WHERE detected_at > TIMESTAMPTZ '{as_of}' - INTERVAL '24 hours'
+
+- question: How many actions are waiting for approval?
+  sql: SELECT count(*) FROM actions WHERE status = 'proposed'
+
+- question: Which hub pairs are connected by air?
+  sql: SELECT origin_hub, destination_hub FROM routes WHERE mode = 'air'
+
+- question: How many shipments are past their promised delivery time and still not delivered or returned?
+  sql: |
+    SELECT count(*) FROM shipments
+    WHERE promised_by < TIMESTAMPTZ '{as_of}' AND status NOT IN ('delivered', 'returned')
+
+- question: What percentage of shipments are express?
+  sql: SELECT round(100.0 * count(*) FILTER (WHERE service_level = 'express') / nullif(count(*), 0), 1) FROM shipments
+
+- question: What are the top 3 destination cities by number of shipments?
+  ordered: true
+  sql: SELECT destination_city FROM shipments GROUP BY destination_city ORDER BY count(*) DESC LIMIT 3
+
+- question: How many shipments have had more than one failed delivery attempt?
+  sql: |
+    SELECT count(*) FROM (
+      SELECT tracking_number FROM tracking_events WHERE event_type = 'delivery_attempt_failed'
+      GROUP BY tracking_number HAVING count(*) > 1
+    ) t

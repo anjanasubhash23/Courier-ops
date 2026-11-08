@@ -21,8 +21,10 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     func,
+    text,
     true,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # Deterministic constraint names, so Alembic migrations can drop and alter them reliably.
@@ -90,6 +92,67 @@ STATUS_AFTER_EVENT: dict[EventType, ShipmentStatus] = {
     EventType.RTO_INITIATED: ShipmentStatus.RETURNING,
     EventType.RETURNED_TO_ORIGIN: ShipmentStatus.RETURNED,
 }
+
+
+class FaultType(StrEnum):
+    PICKUP_DELAY = "pickup_delay"
+    HUB_STUCK = "hub_stuck"
+    MISSED_CONNECTION = "missed_connection"
+    MISROUTE = "misroute"
+    FAILED_DELIVERY = "failed_delivery"
+    LOST = "lost"
+
+
+class ExceptionRule(StrEnum):
+    PICKUP_OVERDUE = "pickup_overdue"
+    STUCK_AT_HUB = "stuck_at_hub"
+    STUCK_AT_DELIVERY_CENTER = "stuck_at_delivery_center"
+    IN_TRANSIT_OVERDUE = "in_transit_overdue"
+    DELIVERY_FAILED = "delivery_failed"
+    MISROUTED = "misrouted"
+    SLA_BREACH = "sla_breach"
+
+
+class ExceptionStatus(StrEnum):
+    OPEN = "open"
+    RESOLVED = "resolved"
+
+
+class Severity(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class Role(StrEnum):
+    """In increasing order of what they may do."""
+
+    VIEWER = "viewer"  # read everything except the audit log, ask questions
+    OPERATOR = "operator"  # propose actions, resolve exceptions, run triage
+    SUPERVISOR = "supervisor"  # approve or reject actions
+    ADMIN = "admin"  # run the detector, read the audit log
+
+    @property
+    def rank(self) -> int:
+        return list(Role).index(self)
+
+
+class ActionType(StrEnum):
+    PRIORITY_PICKUP = "priority_pickup"
+    ESCALATE_TO_HUB = "escalate_to_hub"
+    REROUTE = "reroute"
+    OPEN_TRACE = "open_trace"
+    RESCHEDULE_DELIVERY = "reschedule_delivery"
+    NOTIFY_CUSTOMER = "notify_customer"
+    INITIATE_RTO = "initiate_rto"
+
+
+class ActionStatus(StrEnum):
+    PROPOSED = "proposed"
+    REJECTED = "rejected"
+    EXECUTED = "executed"
+    FAILED = "failed"
+
 
 PINCODE_PATTERN = "^[1-9][0-9]{5}$"
 
@@ -166,6 +229,12 @@ class Shipment(Base):
         CheckConstraint(f"destination_pincode ~ '{PINCODE_PATTERN}'", name="destination_pincode_format"),
         CheckConstraint("weight_grams > 0", name="weight_positive"),
         CheckConstraint("promised_by > booked_at", name="promise_after_booking"),
+        # For "what's at this hub now"; only live shipments, so it stays small (eval/db/results.md).
+        Index(
+            "ix_shipments_live_last_scan_hub_id",
+            "last_scan_hub_id",
+            postgresql_where=text("status NOT IN ('delivered', 'returned')"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -196,6 +265,7 @@ class TrackingEvent(Base):
     __tablename__ = "tracking_events"
     __table_args__ = (
         Index("ix_tracking_events_shipment_id_occurred_at", "shipment_id", "occurred_at"),
+        Index("ix_tracking_events_occurred_at", "occurred_at"),  # the simulated clock and time windows
         CheckConstraint(
             "event_type NOT IN ('arrived_at_hub', 'departed_hub') OR hub_id IS NOT NULL", name="hub_scan_has_hub"
         ),
@@ -210,3 +280,132 @@ class TrackingEvent(Base):
     reason: Mapped[str | None] = mapped_column(String(64))  # e.g. "customer_unavailable" on a failed attempt
     occurred_at: Mapped[datetime] = mapped_column(_timestamp())  # simulated (business) time
     recorded_at: Mapped[datetime] = mapped_column(_timestamp(), server_default=func.now())  # wall-clock insert time
+
+
+class SimFault(Base):
+    """Ground truth: a fault the simulator injected into a shipment's journey.
+
+    Used to score the detector and triage agent, so the agent and Text-to-SQL database roles must never
+    be able to read it.
+    """
+
+    __tablename__ = "sim_faults"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    shipment_id: Mapped[int] = mapped_column(ForeignKey("shipments.id"), index=True)
+    fault_type: Mapped[FaultType] = mapped_column(_enum(FaultType, "fault_type"))
+    hub_id: Mapped[int | None] = mapped_column(ForeignKey("hubs.id"))
+    route_id: Mapped[int | None] = mapped_column(ForeignKey("routes.id"))
+    injected_at: Mapped[datetime] = mapped_column(_timestamp())  # simulated time the fault began
+    details: Mapped[dict[str, int | str]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+
+
+class ShipmentException(Base):
+    """A problem the detector found with a shipment. At most one open exception per shipment and rule."""
+
+    __tablename__ = "exceptions"
+    __table_args__ = (
+        Index(
+            "uq_exceptions_open_shipment_rule",
+            "shipment_id",
+            "rule",
+            unique=True,
+            postgresql_where=text("status = 'open'"),
+        ),
+        Index("ix_exceptions_status_rule", "status", "rule"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    shipment_id: Mapped[int] = mapped_column(ForeignKey("shipments.id"), index=True)
+    rule: Mapped[ExceptionRule] = mapped_column(_enum(ExceptionRule, "exception_rule"))
+    severity: Mapped[Severity] = mapped_column(_enum(Severity, "severity"))
+    status: Mapped[ExceptionStatus] = mapped_column(
+        _enum(ExceptionStatus, "exception_status"), server_default=ExceptionStatus.OPEN.value
+    )
+    hub_id: Mapped[int | None] = mapped_column(ForeignKey("hubs.id"))  # where the shipment was when detected
+    details: Mapped[dict[str, int | float | str]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    # Simulated (business) time, like tracking_events.occurred_at.
+    detected_at: Mapped[datetime] = mapped_column(_timestamp())
+    last_seen_at: Mapped[datetime] = mapped_column(_timestamp())
+    resolved_at: Mapped[datetime | None] = mapped_column(_timestamp())
+    resolved_by: Mapped[str | None] = mapped_column(String(64))  # "detector" when the condition cleared, else a user
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    role: Mapped[Role] = mapped_column(_enum(Role, "role"))
+    is_active: Mapped[bool] = mapped_column(server_default=true())
+    created_at: Mapped[datetime] = mapped_column(_timestamp(), server_default=func.now())
+
+
+class Action(Base):
+    """A corrective action for an exception. Nothing happens until a second person approves it.
+
+    `proposed_by` is a username, or `agent:<name>` when the triage agent proposed it.
+    """
+
+    __tablename__ = "actions"
+    __table_args__ = (
+        # One pending proposal per exception and action type.
+        Index(
+            "uq_actions_pending_exception_type",
+            "exception_id",
+            "action_type",
+            unique=True,
+            postgresql_where=text("status = 'proposed'"),
+        ),
+        Index("ix_actions_status", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    exception_id: Mapped[int] = mapped_column(ForeignKey("exceptions.id"), index=True)
+    action_type: Mapped[ActionType] = mapped_column(_enum(ActionType, "action_type"))
+    params: Mapped[dict[str, str]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    rationale: Mapped[str | None] = mapped_column(String(2000))
+    status: Mapped[ActionStatus] = mapped_column(
+        _enum(ActionStatus, "action_status"), server_default=ActionStatus.PROPOSED.value
+    )
+    proposed_by: Mapped[str] = mapped_column(String(64))
+    proposed_at: Mapped[datetime] = mapped_column(_timestamp(), server_default=func.now())
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), unique=True)
+    decided_by: Mapped[str | None] = mapped_column(String(64))
+    decided_at: Mapped[datetime | None] = mapped_column(_timestamp())
+    decision_note: Mapped[str | None] = mapped_column(String(2000))
+    executed_at: Mapped[datetime | None] = mapped_column(_timestamp())
+    result: Mapped[dict[str, str | int] | None] = mapped_column(JSONB)
+
+
+class AuditEntry(Base):
+    """Who did what, when. Append-only: a database trigger rejects UPDATE and DELETE."""
+
+    __tablename__ = "audit_log"
+    __table_args__ = (Index("ix_audit_log_entity", "entity_type", "entity_id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    at: Mapped[datetime] = mapped_column(_timestamp(), server_default=func.now())
+    actor: Mapped[str] = mapped_column(String(64))
+    event: Mapped[str] = mapped_column(String(64))  # e.g. "action.approved"
+    entity_type: Mapped[str] = mapped_column(String(32))
+    entity_id: Mapped[int] = mapped_column(BigInteger)
+    details: Mapped[dict[str, str | int | None]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+
+
+class TriageRun(Base):
+    """One diagnosis of an exception, by the triage agent or the rule-based fallback."""
+
+    __tablename__ = "triage_runs"
+    __table_args__ = (CheckConstraint("confidence BETWEEN 0 AND 1", name="confidence_range"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    exception_id: Mapped[int] = mapped_column(ForeignKey("exceptions.id"), index=True)
+    cause: Mapped[str] = mapped_column(String(32))
+    confidence: Mapped[float] = mapped_column(Float)
+    summary: Mapped[str] = mapped_column(String(2000))
+    evidence: Mapped[list[str]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    diagnoser: Mapped[str] = mapped_column(String(64))  # "rules", or "llm:<provider>/<model>"
+    action_ids: Mapped[list[int]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    created_at: Mapped[datetime] = mapped_column(_timestamp(), server_default=func.now())

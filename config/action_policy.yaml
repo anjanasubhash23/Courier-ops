@@ -1,1 +1,13 @@
-# allowed actions per cause
+# Which corrective actions may be proposed for each exception rule, by a person or by the triage agent.
+# Anything not listed here is rejected. Every action needs approval from someone other than its proposer.
+
+approver_role: supervisor          # minimum role that may approve or reject
+
+allowed:
+  pickup_overdue:           [priority_pickup, notify_customer]
+  stuck_at_hub:             [escalate_to_hub, reroute, notify_customer]
+  stuck_at_delivery_center: [escalate_to_hub, reschedule_delivery, notify_customer]
+  in_transit_overdue:       [open_trace, notify_customer]
+  delivery_failed:          [reschedule_delivery, notify_customer, initiate_rto]
+  misrouted:                [reroute, escalate_to_hub]
+  sla_breach:               [notify_customer, escalate_to_hub]
