@@ -8,7 +8,10 @@ from tests.conftest import alembic_config
 
 pytestmark = pytest.mark.postgres
 
-TABLES = {"hubs", "hub_service_areas", "routes", "shipments", "tracking_events"}
+TABLES = {
+    "hubs", "hub_service_areas", "routes", "shipments", "tracking_events", "sim_faults", "exceptions",
+    "users", "actions", "audit_log", "triage_runs",
+}  # fmt: skip
 
 
 def _tables(engine: Engine) -> set[str]:

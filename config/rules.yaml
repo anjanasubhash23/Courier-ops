@@ -1,1 +1,29 @@
-# exception thresholds
+# Exception rules. The detector evaluates every rule against each shipment's state as of a given time.
+# Thresholds are tuned against simulator timings (config/simulator.yaml) so a healthy shipment never trips them:
+# check with `uv run python -m eval.run_eval detector`.
+
+pickup_overdue:            # booked but not picked up. Normal: within 4 h, or by ~12:00 next day for late bookings
+  severity: medium
+  hours: 18
+
+stuck_at_hub:              # no scan since arriving at (or being picked up at) a hub that isn't the destination.
+  severity: high           # Normal dwell is 1-3 h
+  hours: 12
+
+stuck_at_delivery_center:  # waiting at the destination delivery center. Normal: until the next morning's round,
+  severity: medium         # which can be up to ~26 h after an arrival just after it left
+  hours: 30
+
+in_transit_overdue:        # departed but not arrived, well past the route's planned transit time
+  severity: high
+  transit_factor: 1.5
+  grace_minutes: 60
+
+delivery_failed:           # the latest attempt failed
+  severity: medium
+
+misrouted:                 # arrived at a delivery center that isn't the destination, or at the same hub twice
+  severity: high
+
+sla_breach:                # past the promised time and not delivered or returned
+  severity: high

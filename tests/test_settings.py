@@ -43,6 +43,7 @@ def test_database_url_escapes_special_characters() -> None:
 def test_reads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("POSTGRES_PASSWORD", "from-the-env")
     monkeypatch.setenv("POSTGRES_PORT", "6543")
+    monkeypatch.setenv("JWT_SECRET", "x" * 32)
     from app.settings import Settings
 
     s = Settings(_env_file=None)

@@ -8,10 +8,12 @@ import logging
 from importlib.metadata import version
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel
 from sqlalchemy import Engine, text
 from sqlalchemy.exc import SQLAlchemyError
+
+from app.deps import get_engine
 
 log = logging.getLogger(__name__)
 
@@ -28,11 +30,6 @@ class Health(BaseModel):
 class Readiness(BaseModel):
     status: Check
     postgres: Check
-
-
-def get_engine(request: Request) -> Engine:
-    engine: Engine = request.app.state.engine
-    return engine
 
 
 @router.get("/health")

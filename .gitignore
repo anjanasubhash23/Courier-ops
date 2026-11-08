@@ -17,3 +17,5 @@ __pycache__/
 # frontend (web/)
 node_modules/
 .next/
+next-env.d.ts
+*.tsbuildinfo
