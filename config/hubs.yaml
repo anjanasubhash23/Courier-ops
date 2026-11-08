@@ -1,1 +1,46 @@
-# cities, pincode prefixes, types
+# The courier network: hubs, the pincode prefixes each delivery center serves, and routes.
+# Load with: uv run python scripts/seed_hubs.py  (safe to re-run; hubs and routes missing here are deactivated)
+#
+# Types: gateway (sort center with air linehaul), sort_center, delivery_center (last mile).
+# Routes are one record per pair; bidirectional (default true) also creates the reverse leg.
+
+hubs:
+  - {code: DEL-GW, name: Delhi Gateway, city: New Delhi, state: Delhi, type: gateway, lat: 28.5562, lon: 77.1000}
+  - {code: BOM-GW, name: Mumbai Gateway, city: Mumbai, state: Maharashtra, type: gateway, lat: 19.0896, lon: 72.8656}
+  - {code: BLR-GW, name: Bengaluru Gateway, city: Bengaluru, state: Karnataka, type: gateway, lat: 13.1986, lon: 77.7066}
+  - {code: MAA-SC, name: Chennai Sort Center, city: Chennai, state: Tamil Nadu, type: sort_center, lat: 13.0067, lon: 80.2206}
+  - {code: CCU-SC, name: Kolkata Sort Center, city: Kolkata, state: West Bengal, type: sort_center, lat: 22.6420, lon: 88.4312}
+  - {code: HYD-SC, name: Hyderabad Sort Center, city: Hyderabad, state: Telangana, type: sort_center, lat: 17.2403, lon: 78.4294}
+
+  - {code: DEL-DC1, name: Delhi Central DC, city: New Delhi, state: Delhi, type: delivery_center, lat: 28.6328, lon: 77.2197, pincode_prefixes: ["110"]}
+  - {code: BOM-DC1, name: Mumbai Andheri DC, city: Mumbai, state: Maharashtra, type: delivery_center, lat: 19.1136, lon: 72.8697, pincode_prefixes: ["400"]}
+  - {code: PNQ-DC1, name: Pune DC, city: Pune, state: Maharashtra, type: delivery_center, lat: 18.5204, lon: 73.8567, pincode_prefixes: ["411", "412"]}
+  - {code: BLR-DC1, name: Bengaluru Koramangala DC, city: Bengaluru, state: Karnataka, type: delivery_center, lat: 12.9352, lon: 77.6245, pincode_prefixes: ["560"]}
+  - {code: MAA-DC1, name: Chennai Guindy DC, city: Chennai, state: Tamil Nadu, type: delivery_center, lat: 13.0108, lon: 80.2120, pincode_prefixes: ["600"]}
+  - {code: CCU-DC1, name: Kolkata Salt Lake DC, city: Kolkata, state: West Bengal, type: delivery_center, lat: 22.5867, lon: 88.4171, pincode_prefixes: ["700"]}
+  - {code: HYD-DC1, name: Hyderabad Madhapur DC, city: Hyderabad, state: Telangana, type: delivery_center, lat: 17.4483, lon: 78.3915, pincode_prefixes: ["500"]}
+
+routes:
+  # Feeder legs: sort center <-> delivery center
+  - {from: DEL-GW, to: DEL-DC1, mode: road, distance_km: 20, transit_minutes: 90}
+  - {from: BOM-GW, to: BOM-DC1, mode: road, distance_km: 8, transit_minutes: 60}
+  - {from: BOM-GW, to: PNQ-DC1, mode: road, distance_km: 150, transit_minutes: 240}
+  - {from: BLR-GW, to: BLR-DC1, mode: road, distance_km: 40, transit_minutes: 120}
+  - {from: MAA-SC, to: MAA-DC1, mode: road, distance_km: 5, transit_minutes: 45}
+  - {from: CCU-SC, to: CCU-DC1, mode: road, distance_km: 8, transit_minutes: 60}
+  - {from: HYD-SC, to: HYD-DC1, mode: road, distance_km: 30, transit_minutes: 90}
+
+  # Road linehaul
+  - {from: DEL-GW, to: BOM-GW, mode: road, distance_km: 1420, transit_minutes: 1560}
+  - {from: DEL-GW, to: CCU-SC, mode: road, distance_km: 1530, transit_minutes: 1800}
+  - {from: BOM-GW, to: BLR-GW, mode: road, distance_km: 985, transit_minutes: 1200}
+  - {from: BOM-GW, to: HYD-SC, mode: road, distance_km: 710, transit_minutes: 840}
+  - {from: BLR-GW, to: MAA-SC, mode: road, distance_km: 350, transit_minutes: 420}
+  - {from: BLR-GW, to: HYD-SC, mode: road, distance_km: 570, transit_minutes: 660}
+  - {from: HYD-SC, to: MAA-SC, mode: road, distance_km: 630, transit_minutes: 720}
+  - {from: MAA-SC, to: CCU-SC, mode: road, distance_km: 1670, transit_minutes: 1920}
+
+  # Air linehaul between gateways (transit includes handling at both ends)
+  - {from: DEL-GW, to: BOM-GW, mode: air, distance_km: 1150, transit_minutes: 300}
+  - {from: DEL-GW, to: BLR-GW, mode: air, distance_km: 1740, transit_minutes: 330}
+  - {from: BOM-GW, to: BLR-GW, mode: air, distance_km: 840, transit_minutes: 270}

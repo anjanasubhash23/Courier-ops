@@ -1,5 +1,54 @@
 [project]
 name = "courier-ops-copilot"
 version = "0.1.0"
-requires-python = ">=3.11"
-dependencies = []
+description = "AI operations copilot for a simulated parcel delivery network."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "alembic>=1.20,<2",
+    "fastapi>=0.162,<1",
+    "psycopg[binary]>=3.3,<4",
+    "pydantic-settings>=2.16,<3",
+    "pyyaml>=6.0,<7",
+    "sqlalchemy>=2.1,<3",
+    "uvicorn[standard]>=0.54,<1",
+]
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.16,<3",
+    "mypy>=2.4,<3",
+    "pytest>=9.2,<10",
+    "ruff>=0.17,<0.18",
+    "types-pyyaml>=6.0,<7",
+]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*", "core*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = ["postgres: needs the Postgres from docker-compose.yml (skipped if unreachable)"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+files = ["app", "core", "migrations", "tests"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
